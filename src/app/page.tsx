@@ -112,6 +112,62 @@ interface HistoryItem {
   content: GeneratedContent;
 }
 
+// IndexedDB helper functions for persistent storage
+const DB_NAME = "warungku-db";
+const DB_VERSION = 1;
+const STORE_NAME = "history";
+
+const openDB = (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+    request.onupgradeneeded = (event) => {
+      const db = (event.target as IDBOpenDBRequest).result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: "id" });
+      }
+    };
+  });
+};
+
+const saveHistoryToDB = async (items: HistoryItem[]): Promise<void> => {
+  const db = await openDB();
+  const tx = db.transaction(STORE_NAME, "readwrite");
+  const store = tx.objectStore(STORE_NAME);
+  
+  // Clear old items and save new ones
+  store.clear();
+  items.forEach(item => {
+    store.put({ ...item, timestamp: item.timestamp.toISOString() });
+  });
+  
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+};
+
+const loadHistoryFromDB = async (): Promise<HistoryItem[]> => {
+  const db = await openDB();
+  const tx = db.transaction(STORE_NAME, "readonly");
+  const store = tx.objectStore(STORE_NAME);
+  const request = store.getAll();
+  
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => {
+      const items = request.result.map((item: any) => ({
+        ...item,
+        timestamp: new Date(item.timestamp)
+      }));
+      // Sort by timestamp descending
+      items.sort((a: HistoryItem, b: HistoryItem) => b.timestamp.getTime() - a.timestamp.getTime());
+      resolve(items);
+    };
+    request.onerror = () => reject(request.error);
+  });
+};
+
 export default function WarungKuPage() {
   // Core state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -139,33 +195,38 @@ export default function WarungKuPage() {
   const [batchPreviews, setBatchPreviews] = useState<string[]>([]);
   const [batchResults, setBatchResults] = useState<GeneratedContent[]>([]);
 
-  // Load history from localStorage
+  // Load history from IndexedDB
   useEffect(() => {
-    const savedHistory = localStorage.getItem("warungku-history");
-    if (savedHistory) {
-      try {
-        const parsed = JSON.parse(savedHistory);
-        setHistory(parsed.map((item: HistoryItem) => ({
-          ...item,
-          timestamp: new Date(item.timestamp)
-        })));
-      } catch (e) {
-        console.error("Failed to load history");
-      }
-    }
+    loadHistoryFromDB()
+      .then(items => {
+        // Filter out invalid items (old format with "generated" placeholder)
+        const validItems = items.filter(item => 
+          item.thumbnail && 
+          item.thumbnail.startsWith('data:') &&
+          item.content?.image !== "generated"
+        );
+        setHistory(validItems);
+        // Clean up invalid items from DB
+        if (validItems.length !== items.length) {
+          saveHistoryToDB(validItems).catch(console.error);
+        }
+      })
+      .catch(err => console.error("Failed to load history:", err));
   }, []);
 
-  // Save to history (without storing full image data to avoid quota exceeded)
-  const saveToHistory = (content: GeneratedContent, thumbnail: string) => {
-    const slimContent: GeneratedContent = {
-      type: content.type,
-      productAnalysis: content.productAnalysis,
-      hashtags: content.hashtags,
-      caption: content.caption,
-      image: content.image ? "generated" : undefined,
-      carousel: content.carousel ? ["generated"] : undefined
-    };
-    
+  // Clear all history
+  const clearHistory = async () => {
+    setHistory([]);
+    try {
+      await saveHistoryToDB([]);
+      toast({ title: "Riwayat dihapus", description: "Semua riwayat telah dihapus" });
+    } catch (e) {
+      console.error("Failed to clear history:", e);
+    }
+  };
+
+  // Save to history with full image data (using IndexedDB for larger storage)
+  const saveToHistory = async (content: GeneratedContent, thumbnail: string) => {
     const newItem: HistoryItem = {
       id: Date.now().toString(),
       timestamp: new Date(),
@@ -173,17 +234,16 @@ export default function WarungKuPage() {
       theme: selectedTheme,
       contentType,
       thumbnail,
-      content: slimContent
+      content: { ...content } // Store full content including images
     };
     
-    const newHistory = [newItem, ...history].slice(0, 10);
+    const newHistory = [newItem, ...history].slice(0, 20); // Keep 20 items
     setHistory(newHistory);
     
     try {
-      localStorage.setItem("warungku-history", JSON.stringify(newHistory));
+      await saveHistoryToDB(newHistory);
     } catch (e) {
-      console.warn("Failed to save history - storage full");
-      localStorage.removeItem("warungku-history");
+      console.warn("Failed to save history to IndexedDB:", e);
     }
   };
 
@@ -207,8 +267,14 @@ export default function WarungKuPage() {
     }
 
     setSelectedFile(file);
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
+    
+    // Convert to base64 for persistent storage
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPreviewUrl(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+    
     setGeneratedContent(null);
     setStatus("idle");
     setGeneratedHashtags([]);
@@ -387,7 +453,10 @@ export default function WarungKuPage() {
       setProgress(100);
       setStatus("completed");
       setGeneratedContent(result);
-      saveToHistory(result, previewUrl);
+      
+      // Save to history with generated image as thumbnail
+      const historyThumbnail = result.image || result.carousel?.[0] || previewUrl;
+      saveToHistory(result, historyThumbnail);
 
       toast({
         title: "Berhasil!",
@@ -1234,8 +1303,18 @@ export default function WarungKuPage() {
       {/* History Dialog */}
       <Dialog open={showHistoryDialog} onOpenChange={setShowHistoryDialog}>
         <DialogContent className="sm:max-w-2xl w-[calc(100%-32px)] max-w-[calc(100%-32px)] sm:w-full">
-          <DialogHeader>
+          <DialogHeader className="flex flex-row items-center justify-between">
             <DialogTitle className="text-base sm:text-lg">Riwayat Konten</DialogTitle>
+            {history.length > 0 && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="text-destructive hover:text-destructive text-xs"
+                onClick={clearHistory}
+              >
+                Hapus Semua
+              </Button>
+            )}
           </DialogHeader>
           <ScrollArea className="h-[300px] sm:h-[400px]">
             {history.length === 0 ? (
@@ -1246,9 +1325,26 @@ export default function WarungKuPage() {
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-4 p-1 sm:p-2">
                 {history.map((item) => (
-                  <Card key={item.id} className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow">
+                  <Card 
+                    key={item.id} 
+                    className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
+                    onClick={() => {
+                      // Restore content from history
+                      setGeneratedContent(item.content);
+                      setContentType(item.contentType);
+                      setSelectedTheme(item.theme);
+                      setProductName(item.productName);
+                      setPreviewUrl(item.thumbnail);
+                      setStatus("completed");
+                      setShowHistoryDialog(false);
+                      toast({
+                        title: "Konten dimuat",
+                        description: `Menampilkan ${item.productName}`
+                      });
+                    }}
+                  >
                     <img 
-                      src={item.thumbnail} 
+                      src={item.content.image || item.content.carousel?.[0] || item.thumbnail} 
                       alt={item.productName}
                       className="w-full aspect-square object-cover"
                     />
