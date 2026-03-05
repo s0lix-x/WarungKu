@@ -1,4 +1,4 @@
-# WarungKu 🛍️
+# WarungKu
 
 > **AI-powered promotional content generator for Indonesian SMEs (UMKM)**
 > 
@@ -6,11 +6,11 @@
 
 ---
 
-## 🚀 The Problem
+## The Problem
 
 64+ million UMKM in Indonesia struggle to create consistent, professional marketing content. Hiring a designer is expensive. DIY tools are complex. Most end up with low-quality visuals that hurt their brand.
 
-## ✨ The Solution
+## The Solution
 
 WarungKu uses AI to instantly transform a simple product photo into platform-ready promotional content — no design skills needed.
 
@@ -24,11 +24,11 @@ WarungKu uses AI to instantly transform a simple product photo into platform-rea
 
 ## Features
 
-- **📸 Smart Product Analysis** — Qwen VL understands your product from photos, extracting key selling points automatically
-- **🎨 Themed Banner Generation** — 7 themes tailored for Indonesian market (Ramadan, Meme Style, Minimalist, etc.)
-- **✍️ Caption Generation** — Platform-optimized captions with trending hashtags in Bahasa Indonesia
-- **📱 Carousel Generation** — Multi-slide content designed for higher engagement on Instagram & TikTok
-- **🌐 Multi-Platform Support** — Output sized for Instagram, TikTok, WhatsApp, Twitter/X, and Marketplace
+- **Smart Product Analysis** — Qwen VL understands your product from photos, extracting key selling points automatically
+- **Themed Banner Generation** — 7 themes tailored for Indonesian market (Ramadan, Meme Style, Minimalist, etc.)
+- **Caption Generation** — Platform-optimized captions with trending hashtags in Bahasa Indonesia
+- **Carousel Generation** — Multi-slide content designed for higher engagement on Instagram & TikTok
+- **Multi-Platform Support** — Output sized for Instagram, TikTok, WhatsApp, Twitter/X, and Marketplace
 
 ---
 
